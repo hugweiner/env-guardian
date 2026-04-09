@@ -1,69 +1,68 @@
-"""CLI entry-point for env-guardian using Click."""
-
-import sys
-from pathlib import Path
+"""CLI entry point for env-guardian."""
 
 import click
-
 from env_guardian.parser import parse_env_file
 from env_guardian.comparator import compare_envs
+from env_guardian.validator import validate_env
 
 
 @click.group()
-@click.version_option(package_name="env-guardian")
-def cli() -> None:
+def cli():
     """env-guardian: validate and sync environment variables."""
 
 
-@cli.command("compare")
-@click.argument("source", type=click.Path(exists=True, dir_okay=False))
-@click.argument("target", type=click.Path(exists=True, dir_okay=False))
+@cli.command(name="compare")
+@click.argument("base_file", type=click.Path(exists=True))
+@click.argument("target_file", type=click.Path(exists=True))
+@click.option("--ignore-values", is_flag=True, default=False, help="Only compare keys, not values.")
+def compare_cmd(base_file: str, target_file: str, ignore_values: bool):
+    """Compare two .env files and report differences."""
+    base_env = parse_env_file(base_file)
+    target_env = parse_env_file(target_file)
+    diff = compare_envs(base_env, target_env, ignore_values=ignore_values)
+    click.echo(diff.summary())
+    if not diff.is_clean:
+        raise SystemExit(1)
+
+
+@cli.command(name="validate")
+@click.argument("env_file", type=click.Path(exists=True))
 @click.option(
-    "--ignore-values",
-    is_flag=True,
-    default=False,
-    help="Only check for key presence, skip value comparison.",
-)
-@click.option(
-    "--ignore-key",
-    "ignore_keys",
+    "--require",
     multiple=True,
     metavar="KEY",
-    help="Key(s) to exclude from comparison (repeatable).",
+    help="Key that must be present. Repeatable.",
 )
 @click.option(
-    "--strict",
-    is_flag=True,
-    default=False,
-    help="Exit with code 1 if any difference is found.",
+    "--non-empty",
+    multiple=True,
+    metavar="KEY",
+    help="Key whose value must not be empty. Repeatable.",
 )
-def compare_cmd(
-    source: str,
-    target: str,
-    ignore_values: bool,
-    ignore_keys: tuple,
-    strict: bool,
-) -> None:
-    """Compare SOURCE env file against TARGET env file."""
-    try:
-        src_vars = parse_env_file(source)
-        tgt_vars = parse_env_file(target)
-    except FileNotFoundError as exc:
-        click.echo(f"Error: {exc}", err=True)
-        sys.exit(2)
+@click.option(
+    "--pattern",
+    multiple=True,
+    metavar="KEY=REGEX",
+    help="Key=regex pattern the value must satisfy. Repeatable.",
+)
+def validate_cmd(env_file: str, require: tuple, non_empty: tuple, pattern: tuple):
+    """Validate an .env file against specified rules."""
+    env = parse_env_file(env_file)
 
-    diff = compare_envs(
-        src_vars,
-        tgt_vars,
-        ignore_values=ignore_values,
-        ignore_keys=set(ignore_keys),
+    pattern_rules = {}
+    for entry in pattern:
+        if "=" not in entry:
+            raise click.BadParameter(f"Pattern rule must be KEY=REGEX, got: {entry}")
+        key, regex = entry.split("=", 1)
+        pattern_rules[key] = regex
+
+    result = validate_env(
+        env,
+        required_keys=list(require) or None,
+        non_empty_keys=list(non_empty) or None,
+        pattern_rules=pattern_rules or None,
     )
 
-    click.echo(diff.summary())
-
-    if strict and not diff.is_clean:
-        sys.exit(1)
-
-
-if __name__ == "__main__":
-    cli()
+    click.echo(result.summary())
+    if not result.is_valid:
+        raise SystemExit(1)
