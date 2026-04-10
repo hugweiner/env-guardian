@@ -87,3 +87,19 @@ def test_summary_counts_severities():
 def test_lint_warning_str():
     w = LintWarning(key="MY_KEY", message="Some issue", severity="warning")
     assert str(w) == "[WARNING] MY_KEY: Some issue"
+
+
+def test_empty_env_produces_no_warnings():
+    """An empty environment dict should be considered clean with no warnings."""
+    report = lint_env({})
+    assert report.is_clean
+    assert report.warnings == []
+    assert report.summary() == "No lint issues found."
+
+
+@pytest.mark.parametrize("severity", ["warning", "error", "info"])
+def test_by_severity_returns_only_matching(severity):
+    """by_severity() should return only warnings that match the requested severity."""
+    report = lint_env({"bad_key": "value", "MY__VAR": "value"})
+    results = report.by_severity(severity)
+    assert all(w.severity == severity for w in results)
