@@ -82,6 +82,7 @@ def diff_snapshots(old: Snapshot, new: Snapshot) -> SnapshotDiff:
 
 
 def snapshot_to_dict(snap: Snapshot) -> dict:
+    """Serialize a Snapshot to a plain dictionary suitable for JSON export."""
     return {
         "label": snap.label,
         "created_at": snap.created_at,
@@ -93,9 +94,31 @@ def snapshot_to_dict(snap: Snapshot) -> dict:
 
 
 def snapshot_from_dict(data: dict) -> Snapshot:
+    """Deserialize a Snapshot from a plain dictionary produced by snapshot_to_dict."""
     snap = Snapshot(label=data["label"], created_at=data["created_at"])
     for key, meta in data.get("entries", {}).items():
         snap.entries[key] = SnapshotEntry(
             key=key, value=meta["value"], captured_at=meta["captured_at"]
         )
     return snap
+
+
+def filter_snapshot(snap: Snapshot, prefix: str) -> Snapshot:
+    """Return a new Snapshot containing only entries whose keys start with *prefix*.
+
+    Useful for narrowing a full environment snapshot down to a specific
+    namespace (e.g. ``"AWS_"`` or ``"DJANGO_"``).
+
+    Args:
+        snap: The source snapshot to filter.
+        prefix: Only keys that start with this string are kept.
+
+    Returns:
+        A new :class:`Snapshot` with the same label and ``created_at`` timestamp
+        but only the matching entries.
+    """
+    filtered = Snapshot(label=snap.label, created_at=snap.created_at)
+    filtered.entries = {
+        k: v for k, v in snap.entries.items() if k.startswith(prefix)
+    }
+    return filtered
