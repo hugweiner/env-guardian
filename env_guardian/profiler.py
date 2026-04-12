@@ -45,6 +45,10 @@ class ProfileReport:
             lines.append(f"  {cat:<10}: {len(items)}")
         return "\n".join(lines)
 
+    def secrets(self) -> List[ProfileEntry]:
+        """Return all entries classified as secrets."""
+        return self.by_category.get("secret", [])
+
 
 def _classify(key: str, value: str) -> str:
     upper = key.upper()
