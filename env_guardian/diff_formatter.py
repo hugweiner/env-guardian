@@ -1,59 +1,62 @@
-"""Formatters for DiffReport output (text, json, csv)."""
+"""Formatters for DiffReport (line-level differ output)."""
+from __future__ import annotations
 
 import csv
 import io
 import json
 from typing import List
 
-from env_guardian.differ import DiffLine, DiffReport
-
-_STATUS_ORDER = {"removed": 0, "changed": 1, "added": 2, "unchanged": 3}
+from env_guardian.differ import DiffReport, DiffLine
 
 
 def _sorted_lines(report: DiffReport) -> List[DiffLine]:
-    return sorted(report.lines, key=lambda l: (_STATUS_ORDER.get(l.status, 99), l.key))
+    return sorted(report.lines, key=lambda ln: ln.key)
 
 
-def format_text(report: DiffReport, show_unchanged: bool = False) -> str:
-    lines = ["Diff Report", "=" * 40]
-    if report.is_clean():
-        lines.append("No differences found.")
-    else:
-        for line in _sorted_lines(report):
-            if line.status == "unchanged" and not show_unchanged:
-                continue
-            lines.append(str(line))
-    lines.append("")
-    lines.append(report.summary())
+def format_text(report: DiffReport) -> str:
+    lines: List[str] = []
+    lines.append("=== Env Diff ===")
+    for ln in _sorted_lines(report):
+        prefix = {
+            "added": "+",
+            "removed": "-",
+            "changed": "~",
+            "unchanged": " ",
+        }.get(ln.status, " ")
+        if ln.status == "changed":
+            lines.append(f"  {prefix} {ln.key}: {ln.old_value!r} -> {ln.new_value!r}")
+        elif ln.status == "added":
+            lines.append(f"  {prefix} {ln.key}={ln.new_value!r}")
+        elif ln.status == "removed":
+            lines.append(f"  {prefix} {ln.key}={ln.old_value!r}")
+        else:
+            lines.append(f"  {prefix} {ln.key}")
+    added = len(report.added())
+    removed = len(report.removed())
+    changed = len(report.changed())
+    lines.append(
+        f"\nSummary: +{added} added, -{removed} removed, ~{changed} changed"
+    )
     return "\n".join(lines)
 
 
 def format_json(report: DiffReport) -> str:
-    data = [
+    payload = [
         {
-            "key": l.key,
-            "status": l.status,
-            "source_value": l.source_value,
-            "target_value": l.target_value,
+            "key": ln.key,
+            "status": ln.status,
+            "old_value": ln.old_value,
+            "new_value": ln.new_value,
         }
-        for l in _sorted_lines(report)
+        for ln in _sorted_lines(report)
     ]
-    return json.dumps({"summary": report.summary(), "diff": data}, indent=2)
+    return json.dumps(payload, indent=2)
 
 
 def format_csv(report: DiffReport) -> str:
     buf = io.StringIO()
-    writer = csv.DictWriter(
-        buf, fieldnames=["key", "status", "source_value", "target_value"]
-    )
-    writer.writeheader()
-    for line in _sorted_lines(report):
-        writer.writerow(
-            {
-                "key": line.key,
-                "status": line.status,
-                "source_value": line.source_value if line.source_value is not None else "",
-                "target_value": line.target_value if line.target_value is not None else "",
-            }
-        )
+    writer = csv.writer(buf)
+    writer.writerow(["key", "status", "old_value", "new_value"])
+    for ln in _sorted_lines(report):
+        writer.writerow([ln.key, ln.status, ln.old_value or "", ln.new_value or ""])
     return buf.getvalue()
