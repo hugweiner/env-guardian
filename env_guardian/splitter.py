@@ -1,5 +1,4 @@
-"""Split a flat env dict into multiple named buckets by prefix or pattern."""
-
+"""Split an env dict into named buckets based on key-prefix rules."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -13,31 +12,36 @@ class SplitEntry:
     bucket: str
 
     def __str__(self) -> str:  # pragma: no cover
-        return f"[{self.bucket}] {self.key}={self.value}"
+        return f"{self.bucket}: {self.key}={self.value}"
 
 
 @dataclass
 class SplitReport:
-    entries: List[SplitEntry] = field(default_factory=list)
-    _buckets: Dict[str, Dict[str, str]] = field(default_factory=dict, repr=False)
+    _entries: List[SplitEntry] = field(default_factory=list)
 
-    def add(self, key: str, value: str, bucket: str) -> None:
-        self.entries.append(SplitEntry(key=key, value=value, bucket=bucket))
-        self._buckets.setdefault(bucket, {})[key] = value
+    def add(self, entry: SplitEntry) -> None:
+        self._entries.append(entry)
 
     def bucket_names(self) -> List[str]:
-        return sorted(self._buckets.keys())
+        seen: List[str] = []
+        for e in self._entries:
+            if e.bucket not in seen:
+                seen.append(e.bucket)
+        return seen
 
-    def get_bucket(self, name: str) -> Dict[str, str]:
-        return dict(self._buckets.get(name, {}))
+    def by_bucket(self, name: str) -> List[SplitEntry]:
+        return [e for e in self._entries if e.bucket == name]
 
-    def bucket_count(self) -> int:
-        return len(self._buckets)
+    def all_entries(self) -> List[SplitEntry]:
+        return list(self._entries)
+
+    def bucket_env(self, name: str) -> Dict[str, str]:
+        return {e.key: e.value for e in self.by_bucket(name)}
 
     def summary(self) -> str:
-        total = len(self.entries)
-        buckets = self.bucket_count()
-        return f"{total} key(s) split into {buckets} bucket(s)"
+        buckets = self.bucket_names()
+        parts = ", ".join(f"{b}={len(self.by_bucket(b))}" for b in buckets)
+        return f"{len(self._entries)} keys split into {len(buckets)} bucket(s): {parts}"
 
 
 _UNGROUPED = "ungrouped"
@@ -45,32 +49,21 @@ _UNGROUPED = "ungrouped"
 
 def split_env(
     env: Dict[str, str],
-    prefixes: Optional[List[str]] = None,
-    separator: str = "_",
-    include_ungrouped: bool = True,
+    rules: Optional[Dict[str, str]] = None,
 ) -> SplitReport:
-    """Split *env* into buckets derived from *prefixes*.
+    """Split *env* into buckets.
 
-    Each key whose name starts with ``<prefix><separator>`` is placed into the
-    bucket named after that prefix (lowercased).  Keys that match no prefix go
-    into the ``ungrouped`` bucket when *include_ungrouped* is ``True``.
+    *rules* maps a bucket name to a key prefix, e.g.
+        {"db": "DB_", "redis": "REDIS_"}
+    Keys that match no rule land in the ``ungrouped`` bucket.
     """
+    rules = rules or {}
     report = SplitReport()
-    prefixes = [p.upper() for p in (prefixes or [])]
-
     for key, value in env.items():
-        matched_bucket: Optional[str] = None
-        for prefix in prefixes:
-            if key.upper().startswith(prefix + separator):
-                matched_bucket = prefix.lower()
+        matched: Optional[str] = None
+        for bucket, prefix in rules.items():
+            if key.startswith(prefix):
+                matched = bucket
                 break
-
-        if matched_bucket is None:
-            if include_ungrouped:
-                matched_bucket = _UNGROUPED
-            else:
-                continue
-
-        report.add(key, value, matched_bucket)
-
+        report.add(SplitEntry(key=key, value=value, bucket=matched or _UNGROUPED))
     return report

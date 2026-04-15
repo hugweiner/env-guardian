@@ -1,5 +1,4 @@
 """Format a SplitReport as text, JSON, or CSV."""
-
 from __future__ import annotations
 
 import csv
@@ -11,36 +10,35 @@ from env_guardian.splitter import SplitEntry, SplitReport
 
 
 def _sorted_entries(report: SplitReport) -> List[SplitEntry]:
-    return sorted(report.entries, key=lambda e: (e.bucket, e.key))
+    return sorted(report.all_entries(), key=lambda e: (e.bucket, e.key))
 
 
 def format_text(report: SplitReport) -> str:
-    lines: List[str] = ["ENV SPLIT REPORT", "=" * 40]
-    for bucket in report.bucket_names():
-        lines.append(f"\n[{bucket}]")
-        bucket_env = report.get_bucket(bucket)
-        for key in sorted(bucket_env):
-            lines.append(f"  {key}={bucket_env[key]}")
-    lines.append("")
-    lines.append(report.summary())
+    lines: List[str] = ["Env Split Report", "================"]
+    for bucket in sorted(report.bucket_names()):
+        entries = sorted(report.by_bucket(bucket), key=lambda e: e.key)
+        lines.append(f"\n[{bucket}] ({len(entries)} key(s))")
+        for e in entries:
+            lines.append(f"  {e.key}={e.value}")
+    lines.append(f"\n{report.summary()}")
     return "\n".join(lines)
 
 
 def format_json(report: SplitReport) -> str:
-    payload = {
-        "summary": report.summary(),
-        "bucket_count": report.bucket_count(),
+    data = {
         "buckets": {
-            bucket: report.get_bucket(bucket) for bucket in report.bucket_names()
+            bucket: report.bucket_env(bucket)
+            for bucket in sorted(report.bucket_names())
         },
+        "summary": report.summary(),
     }
-    return json.dumps(payload, indent=2)
+    return json.dumps(data, indent=2)
 
 
 def format_csv(report: SplitReport) -> str:
     buf = io.StringIO()
     writer = csv.writer(buf)
     writer.writerow(["bucket", "key", "value"])
-    for entry in _sorted_entries(report):
-        writer.writerow([entry.bucket, entry.key, entry.value])
+    for e in _sorted_entries(report):
+        writer.writerow([e.bucket, e.key, e.value])
     return buf.getvalue()
